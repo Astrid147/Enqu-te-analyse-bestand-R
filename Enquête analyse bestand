@@ -1,0 +1,313 @@
+# ########################################################################################################################################### #
+
+# Bestand: Voorbeeld enquête analyse bestand
+# Auteur: Astrid
+# Aangemaakt: 01-06-2024
+
+#### Opschonen ####
+rm(list = ls())
+cat("\014")
+
+#### Inladen packages ####
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(openxlsx)
+
+#### SEO-kleuren & opmaak ####
+seo_qual <- c("#264249", "#D22C2A", "#498794", "#62BE7E", "#FDED75",
+              "#EEA8A8", "#40995A", "#D8E8EB", "#A0D8B1", "#D9D9D9") 
+seo_stellingen_7 <- c("#a40f14", "#c25839", "#e0a140", "#ffeb84", 
+                      "#bebf65", "#7c9345", "#396625")
+seo_stellingen_5_nvt <- c("#a40f14", "#c25839", "#ffeb84", 
+                          "#7c9345", "#396625","#D9D9D9")
+
+width_stelling <- 50
+
+factor_levels_5_nvt <- c("Zeer oneens", "Oneens", "Neutraal", "Eens", "Zeer eens", "Weet ik niet")
+grootte_levels <- c("Klein", "Middel", "Groot")
+
+#### Working directory & Inladen data ####
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ## current directory
+#setwd(file.path("../.")) 		                                ## 'step back'
+getwd()
+
+data_raw <- read.csv("./Map/data.csv")
+
+#### Opschonen data ####
+data <- data_raw %>%
+  filter(sys_LastQuestion == "Terminate") %>% #verwijdert niet-ingevuld en test
+  select(-c(sys_RespNum:sys_CAPIDeviceID, sys_pagetime_1:sys_pagetime_31)) %>% #verwijdert onnodige kolommen
+  filter(MyIdentifier != "TEST") %>% # Dit is voor deze data niet nodig, omdat er geen test in zit, maar dat is vaak wel het geval
+  mutate_at(vars(starts_with("StellingV1"), 
+                 starts_with("StellingV2"), 
+                 starts_with("StellingV3")), ~ factor(recode(.,
+                                                             '1' = "Zeer oneens",
+                                                             '2' = "Oneens",
+                                                             '3' = "Neutraal",
+                                                             '4' = "Eens",
+                                                             '5' = "Zeer eens", 
+                                                             '6' = "Weet ik niet"), levels = factor_levels_5_nvt)) %>%
+  mutate(grootte = case_when(
+    OmvangV1 <100 ~ "Klein",
+    OmvangV1 >= 100 & OmvangV1 < 500 ~ "Middel",
+    OmvangV1 >= 500 ~ "Groot"
+  ), grootte = factor(grootte, levels = grootte_levels))
+           
+
+##### Workbook aanmaken ####
+wb <- createWorkbook()
+
+
+# ########################################################################################################################################### #
+                                                              #### Simpele histogram ####
+
+vraag <- c("Dit is een vraag") # De vraag in een vector. Dan kan je hem inlezen in het Excel bestand
+
+data %>%
+  select(vraag1) %>%
+  mutate(var = recode_factor(AchtergrondV1, 
+                                       "1" = "Geel",
+                                       "2" = "Blauw",
+                                       "3" = "Groen", 
+                                       "4" = "Rood", 
+                                       "5" = "Anders")) %>%
+  count(var) %>%
+  complete(var = factor(var, levels = c("Geel", "Blauw", "Groen", "Rood", "Anders")), 
+            fill = list(n=0)) %>%
+  mutate(perc = n / sum(n)) -> vraag1 # Ik sla de data hier tussendoor op, omdat ik dit dan kan wegschrijven naar Excel. 
+  
+  ggplot(vraag1, aes(x = reorder(var, -n), y = perc)) +
+  geom_bar(stat = "identity", fill = seo_qual[2]) + 
+  scale_x_discrete(name = "", labels = scales::wrap_format(12)) +
+  scale_y_continuous( name = "Aandeel respondenten", labels = scales::percent) +
+    geom_text(aes(label = sprintf("%.1f%%", perc*100)),
+              position = position_stack(vjust = 0.5),
+              size = 3) +
+  theme_minimal()
+
+ggsave("./Output_Figuren/vraag1.png", bg = "white", height = 10, width = 20, units = "cm")
+
+# Write to wb
+addWorksheet(wb, "vraag1")
+writeData(wb, sheet = "vraag1", x = vraag, startCol = 1, startRow = 1)
+writeData(wb, sheet = "vraag1", x = vraag1, startRow = 2)
+
+# ########################################################################################################################################### #
+                                                              #### Antwoorden bewerken -> historgram ####
+
+vraag <- c("Dit is een vraag")
+
+data %>%
+  select(starts_with("VraagA")) %>%
+  mutate(aantal =n()) %>%
+  pivot_longer(., cols = starts_with("VraagA"), names_to = "type", values_to = "antwoord") %>%
+  filter(!is.na(antwoord)) %>%
+  mutate(type = recode_factor(type, 
+                                "VraagA_1" = "Koe",
+                                "VraagA_2" = "Varken",
+                                "VraagA_3" = "Kip",
+                                "VraagA_4" = "Geit")) %>%
+  group_by(type, antwoord, aantal) %>%
+  count() %>%
+  ungroup() %>%
+  complete(type, antwoord, fill = list(n = 0)) %>%
+  mutate(aantal = mean(aantal, na.rm = T)) %>%
+  group_by(type, aantal) %>%
+  mutate(a = ifelse(antwoord ==3, n, NA), 
+         a = mean(a, na.rm = T), 
+         nn = n+a) %>%
+  group_by(antwoord) %>%
+  mutate(sum_nn = sum(nn), 
+    perc = nn/sum_nn) %>%
+  filter(antwoord != 3) %>%
+  mutate(antwoord = recode_factor(antwoord,
+                                  '1' = "Boer", 
+                                  '2' = "Boerin")) -> vraag2
+
+
+ggplot(vraag2, aes(x = factor(antwoord), y = perc, fill = belegd)) +
+  geom_bar(stat= "identity", nrow =3) +
+  scale_y_continuous( name = "Aandeel antwoorden", labels = scales::percent)  +
+  xlab( "") +
+  scale_fill_manual(name = NULL, values=seo_qual) +
+  theme_minimal()
+
+ggsave("./Output_Figuren/vraag2.png", bg = "white", height = 10, width = 20, units = "cm")
+
+# Write to wb
+addWorksheet(wb, "vraag2")
+writeData(wb, sheet = "vraag2", x = vraag, startRow = 1, startCol = 1)
+writeData(wb, sheet = "vraag2", x = vraag2, startRow = 2)
+
+
+# ########################################################################################################################################### #
+                                                    #### Histogram (meerdere antwoorden mogelijk) ####
+
+vraag <- c("Dit is een vraag (Meerdere antwoorden mogelijk)")
+
+data %>%
+  select(Q4_1:Q4_5) %>%
+  mutate(aantal = n()) %>%
+  pivot_longer(cols = starts_with("Q4"), names_to = "type", values_to = "keuze") %>%
+  filter(keuze == 1) %>%
+  mutate(var = recode_factor(type, 
+                             "Q4_1" = "Huisje",
+                             "Q4_2" = "Tent",
+                             "Q4_3" = "Caravan",
+                             "Q4_4" = "Anders")) %>%
+  group_by(var) %>%
+  reframe(n = n(), 
+          perc = n/aantal) %>%
+  distinct() -> vraag3
+
+  
+ggplot(vraag3, aes(x = fct_relevel(fct_reorder(var, n), c("Anders"), after=0), y = perc)) + 
+  geom_bar(stat = "identity", fill = seo_qual[1]) + 
+  geom_text(aes(label = sprintf("%.1f%%", perc*100)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white") +
+  xlab( "") +
+  scale_y_continuous(name = "Aandeel respondenten", labels = scales::percent)  +
+  theme_minimal() + 
+  coord_flip()
+
+ggsave("./Output_Figuren/vraag3.png", bg = "white", height = 10, width = 20, units = "cm")
+
+# Write to wb
+addWorksheet(wb, "vraag3")
+writeData(wb, sheet = "vraag3", x = vraag, startRow = 1, startCol = 1)
+writeData(wb, sheet = "vraag3", x = vraag3, startRow = 2)
+
+
+# ########################################################################################################################################### #
+                                                                #### Stellingen ####
+
+data %>% 
+  select(starts_with("S1"), grootte) %>%
+  pivot_longer(c(starts_with("S1")), names_to="stelling", values_to="antwoord") %>%
+  filter(!is.na(antwoord)) %>%
+  mutate(stelling_text = recode_factor(stelling, 
+                                  'S1_1' = str_wrap("Stelling 1", width = width_stelling),
+                                  'S1_2' = str_wrap("Stelling 2", width = width_stelling),
+                                  'S1_3' = str_wrap("Stelling 3", width = width_stelling))) %>%
+
+  mutate(antwoord = factor(antwoord, levels = c("Zeer oneens", "Oneens", "Neutraal", "Eens", "Zeer eens", "Weet ik niet"))) %>%
+  group_by(stelling, stelling_text) %>%  
+  count(antwoord) %>%
+  complete(antwoord = factor(antwoord, levels = c("Zeer oneens", "Oneens", "Neutraal", "Eens", "Zeer eens", "Weet ik niet")), 
+           fill = list(n = 0)) %>%
+  mutate(perc = n / sum(n), 
+         p = ifelse(perc > 0.07, scales::percent(perc, accuracy = 0.1), "")) -> stellingen_1
+
+
+###### stellingen_1 (zonder uitsplitsing) ######
+ggplot(stellingen_1, aes(x=stelling_text, y=perc, fill = forcats::fct_rev(antwoord)))  +
+  geom_bar(stat = "identity", color = "white", lwd = 0.25) +
+  scale_y_continuous(name = "Aandeel respondenten", labels = scales::percent, limits=c(0,1), 
+                     breaks = seq(0, 1, by = 0.25),
+                     expand = expansion(add = c(0, 0.05)))+
+  coord_flip() + 
+  labs(title = "Figuur over stellingen") +
+  scale_x_discrete(name = NULL) +
+  scale_fill_manual(name = NULL,
+                    values = rev(seo_stellingen_5_nvt),
+                    guide = guide_legend(reverse = T, nrow =2, byrow = T)) + 
+  
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom", 
+        axis.text.y = element_text(size = 11),
+        legend.key.size = unit(0.5, "cm"))  + 
+  geom_text(aes(label = p), 
+            stat = "identity", 
+            position = position_stack(0.5),
+            size = 3)                                
+                                  
+ggsave("./Output_Figuren/stellingen_1.png", bg = "white", height = 10, width = 20, units = "cm")
+
+# Write to wb
+addWorksheet(wb, "stellingen_1")
+writeData(wb, sheet = "stellingen_1", x = stellingen_1, startRow = 1)
+
+###### stellingen_1 (met uitsplitsing) ######
+
+ggplot(stellingen_1, aes(x = factor(grootte_pf), y = perc, fill = forcats::fct_rev(antwoord))) +
+  geom_bar(stat = "identity", color = "white", lwd = 0.25) +
+  facet_wrap(~stelling_text, nrow = 3) +
+  scale_y_continuous(name = "Aandeel respondenten", labels = scales::percent, limits = c(0, 1),
+                     breaks = seq(0, 1, by = 0.25),
+                     expand = expansion(add = c(0, 0.05))) +
+  coord_flip() +
+  labs(subtitle = "Figuur over stellingen") +
+  scale_x_discrete(name = NULL) +
+  scale_fill_manual(name = NULL,
+                    values = rev(seo_stellingen_5_nvt),
+                    guide = guide_legend(reverse = TRUE, nrow = 2, byrow = TRUE)) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        axis.text.y = element_text(size = 11),
+        legend.key.size = unit(0.5, "cm")) +
+  geom_text(aes(label = p),
+            stat = "identity",
+            position = position_stack(0.5),
+            size = 3)                        
+
+ggsave("./Output_Figuren/stellingen_1_uitsplitsing.png", bg = "white", height = 10, width = 20, units = "cm")
+
+# ########################################################################################################################################### #
+                                   ####  Ja/Nee (meerdere antwoorden mogelijk) ####
+
+vraag <- c("Welke wilt u op tafel hebben? (meerdere antwoorden mogelijk)")
+
+data %>%
+  select(starts_with("Eten_") & !ends_with("other")) %>%
+  pivot_longer(c(starts_with("Eten_")), names_to = "type", values_to = "keuze") %>%
+  mutate(type = recode_factor(type, 
+                               'Eten_1' = "Salade", 
+                               'Eten_2' = "Pasta pesto",
+                               'Eten_3' = "Stokbrood", 
+                               'Eten_4' = "Risotto", 
+                               'Eten_5' = "Tortilla's", 
+                               'Eten_6' = "Stamppot", 
+                               'Eten_7' = "Anders")) %>%
+  filter(!is.na(keuze)) %>%
+  mutate(keuze = recode_factor(keuze,
+                                  '1' = "Ja",
+                                  '0' = "Nee")) %>%
+  group_by(type) %>%
+  mutate(aantal=n()) %>%
+  group_by(type, keuze) %>%
+  summarise(n = n(),
+            aantal = mean(aantal),
+            perc = n / aantal,
+            p = ifelse(perc > 0.05, scales::percent(perc, accuracy = 0.1), "")) -> vraag3
+
+
+  ggplot(InformatieV2, aes(x=fct_relevel(forcats::fct_rev(type), c("Anders"), after=0),
+                y=perc, fill = forcats::fct_rev(keuze)))  +
+  geom_bar(stat = "identity", color = "white", lwd = 0.25) +
+  geom_text(aes(label = p), 
+            stat = "identity", 
+            position = position_stack(0.5),
+            size = 2.5) +
+  scale_y_continuous(name = "Aandeel respondenten", labels = scales::percent, limits=c(0,1),
+                     breaks = seq(0, 1, by = 0.25))  +
+  scale_x_discrete(name = NULL) +
+  scale_fill_manual(name = "Titel legenda",
+                    values = seo_stellingen_5_nvt[c(1,5)], 
+                    guide = guide_legend(reverse = T, byrow = T)) +
+  coord_flip() +
+  theme_minimal(base_size = 10) +
+  theme(legend.title = element_text(size = 10)) 
+  
+ggsave("./Output_Figuren/vraag3.png", bg = "white", height = 10, width = 20, units = "cm")
+
+# Write to wb
+addWorksheet(wb, "vraag3")
+writeData(wb, sheet = "vraag3", x = vraag, startRow = 1, startCol = 1)
+writeData(wb, sheet = "vraag3", x = vraag3, startRow = 2)
+
+
+#### Save wb ####
+saveWorkbook(wb, "./Output_Figuren/Output.xlsx", overwrite = T)
+

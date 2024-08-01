@@ -307,7 +307,43 @@ addWorksheet(wb, "vraag3")
 writeData(wb, sheet = "vraag3", x = vraag, startRow = 1, startCol = 1)
 writeData(wb, sheet = "vraag3", x = vraag3, startRow = 2)
 
-
 #### Save wb ####
 saveWorkbook(wb, "./Output_Figuren/Output.xlsx", overwrite = T)
+
+########################################################################################################################################### #
+                                   ####  Pie chart ####
+
+vraag <- c("Hoveel geeft u uit aan snacks, uitgesplist naar categorie?")
+
+data %>%
+  summarise(
+    s_snack = sum(snacks, na.rm = TRUE),
+    s_taart = sum(taart, na.rm = TRUE), 
+    s_koek = sum(koek, na.rm = TRUE), 
+    s_chips = sum(chips, na.rm = TRUE), 
+  pivot_longer(cols = c("s_taart", "s_koek", "s_chips"), names_to = "type", values_to = "bedrag") %>%
+  mutate(perc = bedrag/s_snack*100) %>%
+ggplot(., aes(x = "", y = bedrag, fill = type)) +
+  geom_bar(stat = "identity", fill = seo_qual[1:3]) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) + 
+  theme_void() +
+    theme(
+    legend.position = "right",
+    legend.title = element_blank(),  
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(x = "") + 
+  geom_text(aes(label = paste0(round(perc, 1), "%")), 
+            position = position_stack(vjust = 0.5)) +
+   scale_fill_manual(values = c("s_taart" = seo_qual[1], "s_koek" = seo_qual[2], "s_chips" = seo_qual[3]))
+
+## Opslaan figuur
+ggsave("./Output_Figuren/vraag4.png", bg = "white", height = 10, width = 20, units = "cm")
+
+
+
+
+
+
 

@@ -334,7 +334,7 @@ ggplot(., aes(x = "", y = bedrag, fill = type)) +
     plot.title = element_text(hjust = 0.5)
   ) +
   labs(x = "") + 
-  geom_text(aes(label = paste0(round(perc, 1), "%")), 
+  geom_text(aes(x = 1.2, label = paste0(round(perc, 1), "%")), 
             position = position_stack(vjust = 0.5)) +
    scale_fill_manual(values = c("s_taart" = seo_qual[1], "s_koek" = seo_qual[2], "s_chips" = seo_qual[3]))
 
